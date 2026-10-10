@@ -1,0 +1,46 @@
+name: ai-kb
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: ai-kb-pg
+    environment:
+      POSTGRES_USER: kba
+      POSTGRES_PASSWORD: kba123456
+      POSTGRES_DB: knowledge_base
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kba -d knowledge_base']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  app:
+    build: .
+    container_name: ai-kb-app
+    env_file: .env
+    environment:
+      PORT: '3001'
+      DATABASE_URL: postgres://kba:kba123456@db:5432/knowledge_base
+      WEB_DIST: /app/web/dist
+      UPLOAD_DIR: /app/uploads
+      LOG_FILE: ''
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+      - pick-radar-prod_default
+    restart: unless-stopped
+
+networks:
+  internal:
+  pick-radar-prod_default:
+    external: true
+
+volumes:
+  pgdata:

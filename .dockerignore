@@ -1,0 +1,12 @@
+.git
+node_modules
+**/node_modules
+web/dist
+server/dist
+server/logs
+server/uploads
+.env
+.env.local
+eval
+docs
+.DS_Store

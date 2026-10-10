@@ -15,8 +15,11 @@ interface ApiEnvelope<T> {
   message: string;
 }
 
+// dev 下 BASE_URL 为 '/'，prod 构建传 --base=/kb/ 时自动带前缀
+const API_BASE = `${import.meta.env.BASE_URL}api`;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: { ...authHeader(), ...(options.headers ?? {}) },
   });
@@ -111,7 +114,7 @@ export async function streamChat(
   cb: ChatCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch('/api/chat', {
+  const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ message }),
