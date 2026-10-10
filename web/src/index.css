@@ -153,6 +153,7 @@ body {
   background: var(--card);
   border: 1px solid var(--border);
   word-break: break-word;
+  overflow-x: auto;
 }
 
 .bubble-error {
@@ -182,6 +183,67 @@ body {
   font-weight: 600;
   color: #f8fafc;
   margin-top: 10px !important;
+}
+
+.md-inline-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.15);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: #e2e8f0;
+}
+
+.md-code {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0b1220;
+  overflow: hidden;
+}
+
+.md-code-lang {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.md-code pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.md-code code {
+  color: #e2e8f0;
+  white-space: pre;
+}
+
+.md-table {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.md-table th,
+.md-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  background: rgba(148, 163, 184, 0.1);
+  color: #e2e8f0;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .thinking {

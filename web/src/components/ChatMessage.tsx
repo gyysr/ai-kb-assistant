@@ -3,7 +3,7 @@ import type { ChatMessage as Message } from '../types';
 
 function renderInline(text: string, onCitation?: (n: number) => void): ReactNode[] {
   const parts: ReactNode[] = [];
-  const regex = /(\*\*[^*]+\*\*)|\[(\d+)\]/g;
+  const regex = /(\*\*[^*]+\*\*)|(`[^`\n]+`)|\[(\d+)\]/g;
   let last = 0;
   let key = 0;
   let m: RegExpExecArray | null;
@@ -13,7 +13,9 @@ function renderInline(text: string, onCitation?: (n: number) => void): ReactNode
     if (m[1]) {
       parts.push(<strong key={key++}>{m[1].slice(2, -2)}</strong>);
     } else if (m[2]) {
-      const n = Number(m[2]);
+      parts.push(<code key={key++} className="md-inline-code">{m[2].slice(1, -1)}</code>);
+    } else if (m[3]) {
+      const n = Number(m[3]);
       parts.push(
         <sup
           key={key++}
@@ -30,6 +32,21 @@ function renderInline(text: string, onCitation?: (n: number) => void): ReactNode
   }
   if (last < text.length) parts.push(text.slice(last));
   return parts;
+}
+
+// GFM 表格分隔行：|---|:--:| 这类，每个单元格只允许 - : 空白
+function isTableSeparator(line: string): boolean {
+  const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+  return cells.length > 0 && cells.every((c) => /^[\s:]*-[\s:-]*$/.test(c));
+}
+
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim());
 }
 
 function renderContent(content: string, onCitation?: (n: number) => void): ReactNode {
@@ -50,14 +67,85 @@ function renderContent(content: string, onCitation?: (n: number) => void): React
     );
   };
 
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
+  const lines = content.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+
+    // 代码块：流式中途未闭合时按已收到内容渲染
+    const fence = /^```(\S*)\s*$/.exec(trimmed);
+    if (fence) {
+      flushList();
+      const lang = fence[1];
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i].trim())) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // 跳过收尾 ```（未闭合时自然越界，无碍）
+      blocks.push(
+        <div key={key++} className="md-code">
+          {lang && <div className="md-code-lang">{lang}</div>}
+          <pre>
+            <code>{codeLines.join('\n')}</code>
+          </pre>
+        </div>,
+      );
+      continue;
+    }
+
+    // 表格：当前行含 | 且下一行是分隔行才成表，否则按普通段落（避免流式半截表格乱闪）
+    if (
+      trimmed.includes('|') &&
+      i + 1 < lines.length &&
+      isTableSeparator(lines[i + 1])
+    ) {
+      flushList();
+      const header = splitTableRow(trimmed);
+      const rows: string[][] = [];
+      i += 2;
+      while (
+        i < lines.length &&
+        lines[i].trim() !== '' &&
+        lines[i].trim().includes('|')
+      ) {
+        rows.push(splitTableRow(lines[i]));
+        i++;
+      }
+      blocks.push(
+        <table key={key++} className="md-table">
+          <thead>
+            <tr>
+              {header.map((cell, c) => (
+                <th key={c}>{renderInline(cell, onCitation)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, r) => (
+              <tr key={r}>
+                {row.map((cell, c) => (
+                  <td key={c}>{renderInline(cell, onCitation)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>,
+      );
+      continue;
+    }
+
     if (/^[-*]\s+/.test(trimmed)) {
       listItems.push(trimmed.replace(/^[-*]\s+/, ''));
+      i++;
       continue;
     }
     flushList();
-    if (trimmed === '') continue;
+    if (trimmed === '') {
+      i++;
+      continue;
+    }
     const heading = /^#{1,4}\s+(.*)/.exec(trimmed);
     if (heading) {
       blocks.push(
@@ -65,9 +153,11 @@ function renderContent(content: string, onCitation?: (n: number) => void): React
           {renderInline(heading[1], onCitation)}
         </p>,
       );
+      i++;
       continue;
     }
     blocks.push(<p key={key++}>{renderInline(trimmed, onCitation)}</p>);
+    i++;
   }
   flushList();
   return blocks;
