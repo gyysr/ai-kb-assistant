@@ -699,6 +699,24 @@ body {
 }
 
 /* ---------- management panels ---------- */
+.panel-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-host[hidden] {
+  display: none;
+}
+
+.chat-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
 .panel {
   flex: 1;
   overflow-y: auto;

@@ -18,6 +18,22 @@ export default function ChatPanel() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // 组件卸载（退出登录）时中止进行中的流，避免半条 SSE 留在后台
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const newChat = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setBusy(false);
+    setMessages([]);
+    setInput('');
+    inputRef.current?.focus();
+  };
+
   const patchLast = (patch: Partial<Message>) => {
     setMessages((prev) => {
       if (prev.length === 0) return prev;
@@ -116,6 +132,16 @@ export default function ChatPanel() {
 
   return (
     <>
+      <div className="chat-toolbar">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={newChat}
+          disabled={busy || (messages.length === 0 && !input.trim())}
+        >
+          ＋ 新对话
+        </button>
+      </div>
       <div className="chat-scroll" ref={scrollRef}>
         {messages.length === 0 ? (
           <div className="empty">

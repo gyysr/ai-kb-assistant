@@ -75,9 +75,18 @@ export default function App() {
         </div>
       </header>
 
-      {tab === 'chat' && <ChatPanel />}
-      {tab === 'docs' && <DocPanel user={auth.user} />}
-      {tab === 'audit' && isAdmin && <AuditPanel />}
+      {/* 始终挂载、用 hidden 隐藏：切 tab 不丢对话状态，进行中的流也不会被卸载打断 */}
+      <div className="panel-host" hidden={tab !== 'chat'}>
+        <ChatPanel />
+      </div>
+      <div className="panel-host" hidden={tab !== 'docs'}>
+        <DocPanel user={auth.user} />
+      </div>
+      {isAdmin && (
+        <div className="panel-host" hidden={tab !== 'audit'}>
+          <AuditPanel />
+        </div>
+      )}
     </div>
   );
 }
