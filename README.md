@@ -48,6 +48,8 @@
 │   └── src/components/     # 对话 / 文档管理 / 审计日志三面板 + 登录页 + 图表块
 ├── eval/                   # promptfoo 评测 → 详见 eval/README.md
 ├── docs/                   # 文档中心（变更日志 / 技术文章 / 部署手册）→ 详见 docs/README.md
+├── deploy/                 # 服务器部署：边缘网关，详见 docs/deployment.md §3.7
+│   └── edge/               # 独立 nginx 容器独占 80，按路径分流 / 与 /kb/（含教学注释）
 ├── Dockerfile              # 多阶段构建（前端 + 后端 + 运行时），含教学注释
 └── docker-compose.yml      # app + pg 两个容器编排，含教学注释
 ```

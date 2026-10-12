@@ -179,6 +179,34 @@
 
 **涉及文件**：全部 42 个源码文件 + 5 份 README（根/server/web/eval/docs）
 
+### 3.7 边缘网关：/kb/ 与 pick-radar 彻底解耦（2026-10-12，`7379a1f`）
+
+**起因（线上事故）**：pick-radar 当天更新 UI，它的 `deploy.sh` 用 `rsync --delete`
+同步文件，把此前写在它 nginx 配置里的 /kb/ 路由块覆盖掉了——连手工备份
+`.bak-20261010` 也被 --delete 一并删除。/kb/ 挂了一段时间，而我们自己的容器
+全程健康。结论：两个项目共用一份"会被对方部署流程覆盖"的配置文件，是结构性隐患。
+
+**做了什么**（谁的配置谁自己管）：
+- 新增 `deploy/edge/`：独立 compose 编排 + 逐行教学注释的 nginx.conf。
+  `edge-nginx` 容器独占 `0.0.0.0:80`，`/` → pick-radar 的 web、`/kb/` → ai-kb-app；
+  挂 external 网络 `pick-radar-prod_default`，两边容器都够得着
+- pick-radar 的 `docker-compose.prod.yml` 删掉 web 的 `ports: 80:80`（web 退到内网）。
+  关键：**Mac 源码同步改了**——它以后 rsync 过来的就是无端口版，服务器与本机不再分叉
+- 旧文件三件套备份到服务器 `/opt/ai-kb-assistant/backups/`（rsync 永远碰不到
+  知识库目录）：改前 compose、被覆盖的 nginx.conf、deploy.sh
+
+**怎么切的**：8080 端口灰度起 edge 验证全路由 → 备份三件套 → 换 compose 重建
+pick-radar web（仅内网，80 空出几秒）→ edge 接管 80。
+
+**验证（16:22 全绿）**：本机 + 外网 + 浏览器三层——`/` 200（pick-radar 无恙）、
+`/kb/` 200、`/kb` 308、`/kb/api/health` JSON 正常、SSE 流式回答逐字到达
+（proxy_buffering off 生效）。pick-radar 自己 deploy.sh 的健康检查走的就是这条
+新链路，照样通过——它以后怎么部署都不影响 /kb/。
+
+**留痕**：`docs/deployment.md` §3.7 完整复盘 + 回滚 runbook（§3.5 已标记为废弃
+历史方案）；pick-radar 侧的 README「更新记录」和 `deploy/docs/05-日常更新与运维.md`
+（新增 5.2 边缘网关章节）也各留了对应条目。
+
 ---
 
 ## 附：踩坑速查表（按主题）
@@ -188,6 +216,7 @@
 | Node | 系统默认 node v16 跑不动新版工具链 | `export PATH="/opt/homebrew/opt/node@21/bin:$PATH"` | 全程 |
 | SSE | Node 21 下 `req.on('close')` 误触发 | 用 `res.on('close')` + `res.writableEnded` | 里程碑 4 |
 | nginx | `rewrite ... break` 吞掉后面的 `set` | set 写在 rewrite 前 | 部署 |
+| 部署 | 两个项目共用一份 nginx 配置，对方 `rsync --delete` 部署一次就覆盖一次（连备份文件都被删） | 独立边缘网关容器独占 80，配置各自归各自的仓库 | 3.7 |
 | Docker | 生产镜像 prune 掉 devDependencies 后，顶层 import pino-pretty 必崩 | 改成 dev 分支内 require | 部署 |
 | 提示词 | "如可用"字眼让 AI 谎称工具不可用 | 按运行时配置动态生成两版提示词 | 3.4 |
 | 前端 | 条件渲染切 tab 销毁组件状态 | always-mount + hidden | 3.1 |

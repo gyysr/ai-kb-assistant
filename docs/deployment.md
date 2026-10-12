@@ -12,34 +12,39 @@
 
 ## 1. 架构总览
 
-服务器上现在跑着**两个互相独立的项目**，靠 nginx 按路径分流：
+服务器上现在跑着**两个互相独立的项目**，由一个专属的「边缘网关」容器按路径分流。
+（2026-10-12 起为此架构。最初是借用 pick-radar 的 nginx 加转发规则——结果它一次
+部署就把规则覆盖掉、/kb/ 挂了，于是彻底解耦，完整复盘见 §3.7。）
 
 ```
 浏览器
   │  http://139.224.67.182/
-  │    /          → pick-radar（原有项目，不变）
+  │    /          → pick-radar（原有项目）
   │    /kb/       → 本项目（AI 知识库问答助手）
   ▼
-pick-radar-prod-web 容器（nginx，对外唯一入口 :80）
+edge-nginx 容器（对外唯一入口 :80，编排与配置在本仓库 deploy/edge/）
   │                              │
-  │ /api/ → api:4100             │ /kb/ → 剥掉前缀 → ai-kb-app:3001
+  │ / → pick-radar-prod-web-1    │ /kb/ → 剥掉前缀 → ai-kb-app:3001
   ▼                              ▼
-选品雷达后端容器组        ai-kb 独立 compose 栈（本项目）
-                               ├── ai-kb-app（Node/Express，前端静态页也在这里）
-                               └── ai-kb-pg（pgvector/pgvector:pg16，不对外暴露端口）
+pick-radar 容器组               ai-kb 独立 compose 栈（本项目）
+（web 也只在 Docker 内网监听，   ├── ai-kb-app（Node/Express，前端静态页也在这里）
+ 不再占宿主机 80）               └── ai-kb-pg（pgvector/pgvector:pg16，不对外暴露端口）
 ```
 
 要点：
 
-- 本项目的两个容器**不占用任何对外端口**，只挂在 Docker 内网（pick-radar 的网络 + 自己的 ai-kb_internal 网络）。
-- 对外的 80 端口仍由 pick-radar 的 nginx 独占，只新增了一段 `/kb/` 转发规则。
+- **80 端口由 `edge-nginx` 独占**，它的编排与配置就在本仓库 `deploy/edge/` 里
+  （git 版本管理）。pick-radar 的部署脚本只会 rsync 它自己的目录，永远碰不到
+  这里——这正是解耦的关键。
+- 本项目的两个容器不占用任何对外端口，只挂 Docker 内网；pick-radar 的 web 容器
+  同样只在 Docker 内网监听（它的 compose 已删掉 ports 映射，Mac 源码同步改过）。
 - 数据库卷 `ai-kb_pgdata` 持久保存数据；上传的文件在容器内 `/app/uploads`（容器重建不丢，除非删容器时加了 `-v`）。
 
 ## 2. 访问方式与账号
 
 | 项 | 值 |
 |---|---|
-| 访问地址 | `http://139.224.67.182/kb/`（注意结尾斜杠；`/kb` 会自动 301 跳转） |
+| 访问地址 | `http://139.224.67.182/kb/`（结尾斜杠；漏写时边缘网关会自动 308 跳转补全） |
 | 管理员 | `admin / admin123`（可上传文档、看审计日志） |
 | 普通用户 | `demo / demo123`（只能对话） |
 
@@ -135,7 +140,12 @@ chmod 600 ~/.ssh/authorized_keys
 > **想收回这台 Mac 的登录权限**：删除服务器 `/home/admin/.ssh/authorized_keys` 里
 > 注释为 `qoder-mac-ai-kb-deploy` 的那一行即可，立即生效。
 
-### 3.5 nginx 增加 /kb/ 转发（唯一影响 pick-radar 的步骤）
+### 3.5 nginx 增加 /kb/ 转发（⚠️ 已废弃的原始方案，仅作留痕）
+
+> **2026-10-12 起此方案已被边缘网关取代（见 §3.7）**。把 /kb/ 路由写进 pick-radar
+> 的配置文件，等于把知识库的可用性押在"对方永远不重新部署"上——当天它跑了一次
+> `deploy.sh`（`rsync --delete`），路由块被覆盖、/kb/ 挂掉，连本节提到的
+> `.bak-20261010` 备份也被 --delete 一并删掉。下文保留原始记录供复盘。
 
 改动文件：`/opt/pick-radar/deploy/nginx.conf`（已备份为 `.bak-20261010`，md5 已核对一致）。
 
@@ -207,6 +217,83 @@ GET /api/health     → 200（pick-radar 自己的 API 无恙）
 6. 浏览器实测：登录 → 发消息 → 回答正确引用知识库内容            ✅
 ```
 
+### 3.7 边缘网关上线：/kb/ 与 pick-radar 彻底解耦（2026-10-12 故障复盘）
+
+**故障经过**：2026-10-12 下午，pick-radar 更新 UI 时跑了它自己的部署脚本
+`deploy.sh`。该脚本用 `rsync -az --delete` 把 Mac 上的文件同步到服务器
+`/opt/pick-radar/`——`--delete` 的含义是"服务器上多出来的文件一律删掉"。于是：
+
+- 服务器上被手工改过的 `deploy/nginx.conf`（含 §3.5 加的 /kb/ 路由块）被仓库原版**覆盖**；
+- 手工做的备份 `nginx.conf.bak-20261010` 被 --delete **直接删掉**。
+
+症状：访问 `/kb/` 返回的是 pick-radar 的前端 HTML（兜底路由接住了请求），
+知识库看起来"崩了"，但其实 ai-kb 两个容器全程健康——坏的只是入口路由。
+
+**根因**：两个项目共用一份**会被对方部署流程覆盖**的配置文件。pick-radar 每重新
+部署一次，/kb/ 就挂一次——结构性问题，靠"下次记得改回来"无解。
+
+**方案：加一层独立的边缘网关（edge nginx），谁的配置谁自己管**
+
+三个动作（commit `7379a1f`）：
+
+1. **新增 `deploy/edge/`**：独立 compose 编排（项目名 `edge`，容器 `edge-nginx`，
+   nginx:alpine）+ 逐行教学注释的 `nginx.conf`。它独占 `0.0.0.0:80`，挂载
+   pick-radar 的 Docker 网络（`external: pick-radar-prod_default`；ai-kb-app
+   本来就挂在这个网上，所以网关两边都够得着）。resolver + 变量式 `proxy_pass`
+   的写法与坑见 `deploy/edge/nginx.conf` 内注释。
+2. **pick-radar 的 `docker-compose.prod.yml` 删掉 web 的 `ports: 80:80`**：web 退到
+   Docker 内网。关键细节——**Mac 上的源码同步改了**（不是只在服务器上改），
+   它以后 rsync 过来的就是"无 ports"版本，服务器与本机不再分叉。
+3. **旧文件三件套备份到 `/opt/ai-kb-assistant/backups/`**（rsync 永远碰不到知识库
+   目录，放这里最安全）：改前 compose、被覆盖后的 nginx.conf、deploy.sh。
+
+**切换过程**（灰度先行，全程停机窗口只有几秒）：
+
+```bash
+# 1) 灰度：先把 edge 以临时端口（8080）起起来，不动线上 80，逐条 curl 验证
+#    /、/kb/、/kb、/kb/api/health、/api/health 全部符合预期后，还原配置
+# 2) 备份三件套到 /opt/ai-kb-assistant/backups/（见上）
+# 3) 换 pick-radar 的 compose（服务器上先改，Mac 源码随后同步）
+cd /opt/pick-radar && sudo docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#    web 容器重建为"仅内网"版本，80 此刻空出来（外网短暂打不开）
+# 4) edge 正式接管 80
+sudo docker compose -f /opt/ai-kb-assistant/deploy/edge/docker-compose.yml up -d
+```
+
+**验证（2026-10-12 16:22，全绿）**：
+
+```
+docker ps:  edge-nginx             0.0.0.0:80->80/tcp   Up   （80 归它独占）
+            pick-radar-prod-web-1  80/tcp（仅内网）
+            ai-kb-app              3001/tcp（仅内网）
+
+本机 curl:  /               → 200（pick-radar 首页无恙）
+            /kb/            → 200
+            /kb             → 308 → /kb/
+            /kb/api/health  → {"code":0,"data":{"status":"up",...}}
+
+外网 + 浏览器：登录、SSE 流式回答逐字到达（证明网关的 proxy_buffering off 生效）、
+上传入库正常。pick-radar 的 deploy.sh 健康检查 curl 127.0.0.1/api/health
+走的也是 edge → web → api 这条链路，照样通过——它的上线流程一个字都不用改。
+```
+
+**回滚 runbook（想退回旧架构时照做）**：
+
+```bash
+# 1) 停边缘网关，80 空出来
+sudo docker compose -f /opt/ai-kb-assistant/deploy/edge/docker-compose.yml down
+# 2) 用备份恢复 pick-radar 的 compose（web 的 ports: 80:80 回来）
+sudo cp /opt/ai-kb-assistant/backups/pick-radar-docker-compose.prod.yml.20261012-pre-edge \
+        /opt/pick-radar/docker-compose.prod.yml
+cd /opt/pick-radar && sudo docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+# 3) 把 §3.5 的 /kb/ 路由块重新插回 /opt/pick-radar/deploy/nginx.conf 并重建 web
+#    （提醒：那条老路会再次被 pick-radar 的下一次 rsync 覆盖——这正是换架构的原因）
+```
+
+**今后 pick-radar 更新时要检查什么？——什么都不用**。这正是解耦的意义：它的
+rsync 只覆盖它自己的目录，edge 的配置在本仓库由 git 管。最多顺手
+`sudo docker ps | grep edge` 确认网关活着。
+
 ## 4. 日常运维命令（都在服务器上执行，需 sudo）
 
 ```bash
@@ -222,6 +309,11 @@ sudo docker compose -f /opt/ai-kb-assistant/docker-compose.yml restart
 sudo docker compose -f /opt/ai-kb-assistant/docker-compose.yml stop
 sudo docker compose -f /opt/ai-kb-assistant/docker-compose.yml start
 
+# 边缘网关（全站 80 入口；编排与配置在本仓库 deploy/edge/，详见 §3.7）
+sudo docker compose -f /opt/ai-kb-assistant/deploy/edge/docker-compose.yml ps
+sudo docker compose -f /opt/ai-kb-assistant/deploy/edge/docker-compose.yml logs -f nginx
+sudo docker restart edge-nginx   # 改了 nginx.conf 后执行（配置是挂载进容器的）
+
 # 服务器整体状态（内存/磁盘）
 free -h && df -h /
 ```
@@ -232,6 +324,8 @@ free -h && df -h /
 cd /opt/ai-kb-assistant
 sudo git pull
 sudo docker compose up -d --build        # 只重建有变化的层，数据库卷不动
+# 若这次改动涉及 deploy/edge/（边缘网关），再补一句：
+sudo docker compose -f deploy/edge/docker-compose.yml up -d
 ```
 
 **完全卸载本项目**（不影响 pick-radar）：
@@ -240,16 +334,19 @@ sudo docker compose up -d --build        # 只重建有变化的层，数据库�
 cd /opt/ai-kb-assistant
 sudo docker compose down                  # 停容器+删容器，保留数据卷
 # sudo docker compose down -v             # 加上 -v 连数据库一起删（不可恢复！）
-# 再把 nginx.conf 里 /kb/ 两段删掉并重建 web 容器，就回到部署前
+sudo docker compose -f deploy/edge/docker-compose.yml down   # 停 80 入口（全站短暂不可达）
+# 再按 backups/ 的备份恢复 pick-radar 的 compose（web 加回 ports: 80:80）并 up -d，
+# 就回到本项目部署之前的样子——完整步骤见 §3.7 回滚 runbook
 ```
 
 ## 5. 回滚方案
 
 | 场景 | 操作 |
 |---|---|
-| /kb/ 打不开，旧站正常 | 先看 `sudo docker logs --tail 50 ai-kb-app`，容器挂了 `sudo docker compose -f /opt/ai-kb-assistant/docker-compose.yml restart` |
-| nginx 配置写坏，全站 5xx | `sudo cp /opt/pick-radar/deploy/nginx.conf.bak-20261010 /opt/pick-radar/deploy/nginx.conf`，再 `cd /opt/pick-radar && sudo docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build web` |
+| /kb/ 打不开，pick-radar 正常 | 先看 `sudo docker logs --tail 50 ai-kb-app`，容器挂了 `sudo docker compose -f /opt/ai-kb-assistant/docker-compose.yml restart`；容器正常再查 edge 日志 |
+| 全站（`/` 和 `/kb/`）都 502 | edge-nginx 出问题：`sudo docker ps \| grep edge` 看是否在跑——没跑就 `sudo docker compose -f /opt/ai-kb-assistant/deploy/edge/docker-compose.yml up -d`；在跑就 `sudo docker logs --tail 50 edge-nginx` 看转发到哪个后端失败 |
 | 新版本部署后有问题 | `cd /opt/ai-kb-assistant && sudo git checkout 上一个commit && sudo docker compose up -d --build` |
+| 想整体退回「共用 pick-radar nginx」的旧架构 | 照 §3.7 末尾的回滚 runbook 做（旧文件备份都在 `/opt/ai-kb-assistant/backups/`） |
 
 ## 6. FAQ
 
@@ -257,7 +354,7 @@ sudo docker compose down                  # 停容器+删容器，保留数据�
 A：目前没有改密接口，最简办法：登录后调注册接口新建一个管理员账号使用（或联系开发者加改密功能）。
 
 **Q：上传文档有什么限制？**
-A：仅支持 `.pdf / .md / .markdown / .txt`，单个最大 20MB（nginx 层限制；应用层默认更小，见 `server/.env.example` 的 `MAX_FILE_SIZE_MB`）。
+A：仅支持 `.pdf / .md / .markdown / .txt`，单个最大 **10MB**（应用层 `MAX_FILE_SIZE_MB` 控制，默认 10；边缘网关 nginx 层放宽到 20m，不构成瓶颈）。
 
 **Q：对话响应慢/报错？**
 A：`sudo docker logs --tail 50 ai-kb-app` 看错误。常见原因：Qwen Key 欠费/失效（日志会有 401）、服务器内存不足（`free -h` 看 swap 是否用满）。
