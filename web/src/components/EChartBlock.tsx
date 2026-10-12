@@ -5,6 +5,7 @@ import {
   DatasetComponent,
   GridComponent,
   LegendComponent,
+  LegendScrollComponent,
   TitleComponent,
   TooltipComponent,
 } from 'echarts/components';
@@ -18,6 +19,7 @@ echarts.use([
   DatasetComponent,
   GridComponent,
   LegendComponent,
+  LegendScrollComponent,
   TitleComponent,
   TooltipComponent,
   CanvasRenderer,
@@ -63,6 +65,41 @@ function parseOption(raw: string): EChartsCoreOption | null {
   }
 }
 
+// 模型生成的 option 布局不可控（legend 常被压到 x 轴上），这里强制一套防重叠布局：
+// legend 固定顶部（横排可滚动），grid.top 预留 标题+图例 高度，containLabel 防轴标签溢出
+function normalizeLayout(option: EChartsCoreOption): EChartsCoreOption {
+  const o = { ...(option as Record<string, unknown>) };
+  const hasTitle = o.title != null && o.title !== '';
+  const series = Array.isArray(o.series) ? (o.series as Record<string, unknown>[]) : [];
+  const hasPie = series.some((s) => s?.type === 'pie');
+
+  const legend = { ...((o.legend as Record<string, unknown>) ?? {}) };
+  delete legend.top;
+  delete legend.bottom;
+  delete legend.left;
+  delete legend.right;
+  legend.type = 'scroll';
+  legend.top = hasTitle ? 32 : 6;
+  legend.left = 'center';
+  o.legend = legend;
+
+  o.grid = {
+    left: 12,
+    right: 12,
+    bottom: 8,
+    containLabel: true,
+    top: hasPie ? 46 : hasTitle ? 66 : 42,
+  };
+
+  if (hasPie) {
+    // 饼图：圆心下移避开顶部图例，模型已显式设置的值优先
+    o.series = series.map((s) =>
+      s?.type === 'pie' ? { center: ['50%', '58%'], radius: '62%', ...s } : s,
+    );
+  }
+  return o as EChartsCoreOption;
+}
+
 function ChartInner({ option }: { option: EChartsCoreOption }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
@@ -82,7 +119,7 @@ function ChartInner({ option }: { option: EChartsCoreOption }) {
   }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(option, { notMerge: true });
+    chartRef.current?.setOption(normalizeLayout(option), { notMerge: true });
   }, [option]);
 
   return <div className="md-chart-canvas" ref={ref} />;
