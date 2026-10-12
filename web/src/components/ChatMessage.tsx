@@ -1,5 +1,8 @@
-import { useRef, type ReactNode } from 'react';
+import { lazy, Suspense, useRef, type ReactNode } from 'react';
 import type { ChatMessage as Message } from '../types';
+
+// echarts 体积大（~560KB），按需分包：出现图表块时才加载
+const EChartBlock = lazy(() => import('./EChartBlock'));
 
 function renderInline(text: string, onCitation?: (n: number) => void): ReactNode[] {
   const parts: ReactNode[] = [];
@@ -83,15 +86,28 @@ function renderContent(content: string, onCitation?: (n: number) => void): React
         codeLines.push(lines[i]);
         i++;
       }
+      const closed = i < lines.length; // 是否找到收尾围栏
       i++; // 跳过收尾 ```（未闭合时自然越界，无碍）
-      blocks.push(
-        <div key={key++} className="md-code">
-          {lang && <div className="md-code-lang">{lang}</div>}
-          <pre>
-            <code>{codeLines.join('\n')}</code>
-          </pre>
-        </div>,
-      );
+      const codeText = codeLines.join('\n');
+      if (lang === 'echarts') {
+        blocks.push(
+          <Suspense
+            key={key++}
+            fallback={<div className="md-chart md-chart-pending">图表组件加载中…</div>}
+          >
+            <EChartBlock raw={codeText} closed={closed} />
+          </Suspense>,
+        );
+      } else {
+        blocks.push(
+          <div key={key++} className="md-code">
+            {lang && <div className="md-code-lang">{lang}</div>}
+            <pre>
+              <code>{codeText}</code>
+            </pre>
+          </div>,
+        );
+      }
       continue;
     }
 
