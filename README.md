@@ -3,6 +3,7 @@
 基于 **Node.js BFF + React + PostgreSQL/pgvector + 通义千问（Qwen）** 的企业知识库问答系统，覆盖 RAG 全链路：文档解析入库 → 向量检索 → Agent 工具调用 → SSE 流式回答（带引用标注）→ 权限审计 → 监控降级 → promptfoo 自动化评测。
 
 配套技术文章：[《用 Node.js BFF 搭建 RAG 知识库系统》](docs/article.md)
+逐次变更详解（面向零基础读者）：[docs/changes.md](docs/changes.md)
 
 ## 功能特性
 

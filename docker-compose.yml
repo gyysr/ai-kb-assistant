@@ -1,28 +1,44 @@
+# ============ docker-compose.yml：容器编排 ============
+# 一条命令 `docker compose up -d` 同时把数据库和应用跑起来，并处理好启动顺序和网络隔离。
+# 名字叫 ai-kb，同 `docker compose ps` 看到的前缀。
+
 name: ai-kb
 
 services:
+  # ---- 数据库：PostgreSQL + pgvector 向量插件 ----
   db:
+    # 官方 pgvector 镜像自带插件，不用自己装；pg16 = PostgreSQL 16
     image: pgvector/pgvector:pg16
     container_name: ai-kb-pg
     environment:
       POSTGRES_USER: kba
       POSTGRES_PASSWORD: kba123456
       POSTGRES_DB: knowledge_base
+    # pgdata 卷 = 把数据存到宿主机。容器删了数据还在，不会"删容器丢库"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
       - internal
     restart: unless-stopped
+    # 健康检查：每 5 秒跑一次 pg_isready，连挂 12 次才算"不健康"
+    # 下面的 app 配了 depends_on + service_healthy：数据库没就绪应用不启动，
+    # 避免应用启动时连不上库直接崩
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U kba -d knowledge_base']
       interval: 5s
       timeout: 3s
       retries: 12
 
+  # ---- 应用：前端 + 后端一体的 Node 服务 ----
   app:
+    # 用根目录 Dockerfile 构建（见该文件注释）
     build: .
     container_name: ai-kb-app
+    # 把同目录 .env 文件里的变量（QWEN_API_KEY、TAVILY_API_KEY 等）注入容器。
+    # 好处：改 Key 只需改 .env 再 `docker compose up -d`，不用改代码重新构建镜像
     env_file: .env
+    # 这几个值覆盖 .env 里的同名项：容器里的数据库地址是 db（服务名即主机名），
+    # 而不是本机 localhost。LOG_FILE 置空 = 生产只输出日志到 stdout（docker logs 可看）
     environment:
       PORT: '3001'
       DATABASE_URL: postgres://kba:kba123456@db:5432/knowledge_base
@@ -34,11 +50,14 @@ services:
         condition: service_healthy
     networks:
       - internal
+      # 外部网络：pick-radar 的 nginx 容器也接在这个网络里，
+      # 才能直接用容器名 ai-kb-app 反代到本应用（见 docs/deployment.md）
       - pick-radar-prod_default
     restart: unless-stopped
 
 networks:
   internal:
+  # external: true = 这个网络不是本项目创建的，是 pick-radar 的 compose 建的，直接挂上去
   pick-radar-prod_default:
     external: true
 
