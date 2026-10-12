@@ -1,5 +1,5 @@
 import { authHeader, clearAuth, notifyUnauthorized } from './auth';
-import type { AuditEntry, AuthState, DocumentInfo, Source, Usage } from './types';
+import type { AuditEntry, AuthState, DocumentInfo, Source, Usage, UsageSummary } from './types';
 
 export interface ChatCallbacks {
   onSources?: (sources: Source[]) => void;
@@ -82,6 +82,10 @@ export async function uploadDocument(
 
 export async function listAudit(): Promise<AuditEntry[]> {
   return request<AuditEntry[]>('/audit');
+}
+
+export async function getUsage(): Promise<UsageSummary> {
+  return request<UsageSummary>('/usage');
 }
 
 function handleBlock(block: string, cb: ChatCallbacks): void {

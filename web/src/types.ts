@@ -60,3 +60,14 @@ export interface AuditEntry {
   ip: string | null;
   createdAt: string;
 }
+
+export interface WebSearchQuota {
+  enabled: boolean;
+  plan?: string;
+  used?: number;
+  limit?: number | null;
+}
+
+export interface UsageSummary {
+  webSearch: WebSearchQuota;
+}

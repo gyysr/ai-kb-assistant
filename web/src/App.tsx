@@ -1,23 +1,44 @@
-import { useEffect, useState } from 'react';
-import { logout } from './api';
+import { useCallback, useEffect, useState } from 'react';
+import { getUsage, logout } from './api';
 import { clearAuth, loadAuth, saveAuth, UNAUTHORIZED_EVENT } from './auth';
 import AuditPanel from './components/AuditPanel';
 import ChatPanel from './components/ChatPanel';
 import DocPanel from './components/DocPanel';
 import LoginView from './components/LoginView';
-import type { AuthState } from './types';
+import type { AuthState, UsageSummary } from './types';
 
 type Tab = 'chat' | 'docs' | 'audit';
+
+function quotaLevel(q: UsageSummary['webSearch']): string {
+  const { used = 0, limit } = q;
+  if (limit == null || limit <= 0) return '';
+  const ratio = used / limit;
+  if (ratio >= 1) return 'quota-out';
+  if (ratio >= 0.9) return 'quota-warn';
+  return 'quota-ok';
+}
 
 export default function App() {
   const [auth, setAuth] = useState<AuthState | null>(() => loadAuth());
   const [tab, setTab] = useState<Tab>('chat');
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+
+  const refreshUsage = useCallback(() => {
+    getUsage()
+      .then(setUsage)
+      .catch(() => setUsage(null));
+  }, []);
 
   useEffect(() => {
     const onExpired = () => setAuth(null);
     window.addEventListener(UNAUTHORIZED_EVENT, onExpired);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onExpired);
   }, []);
+
+  useEffect(() => {
+    if (auth) refreshUsage();
+    else setUsage(null);
+  }, [auth, refreshUsage]);
 
   if (!auth) {
     return (
@@ -65,6 +86,17 @@ export default function App() {
           </nav>
         </div>
         <div className="user-box">
+          {usage?.webSearch.enabled && usage.webSearch.limit != null && (
+            <button
+              type="button"
+              className={`quota-badge ${quotaLevel(usage.webSearch)}`}
+              title={`Tavily ${usage.webSearch.plan ?? ''} 计划 · 已用 ${usage.webSearch.used ?? 0} 次，点击刷新`}
+              onClick={refreshUsage}
+            >
+              联网搜索 {Math.max(0, usage.webSearch.limit - (usage.webSearch.used ?? 0))}/
+              {usage.webSearch.limit}
+            </button>
+          )}
           <span className="user-name">{auth.user.username}</span>
           <span className={`role-badge role-${auth.user.role}`}>
             {isAdmin ? '管理员' : '普通用户'}

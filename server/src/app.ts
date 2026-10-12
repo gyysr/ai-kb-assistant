@@ -9,6 +9,7 @@ import { chatRouter } from './routes/chat';
 import { documentsRouter } from './routes/documents';
 import { healthRouter } from './routes/health';
 import { uploadRouter } from './routes/upload';
+import { usageRouter } from './routes/usage';
 
 const WEB_DIST =
   process.env.WEB_DIST ?? path.resolve(__dirname, '..', '..', 'web', 'dist');
@@ -24,6 +25,7 @@ export function createApp() {
   app.use('/api', documentsRouter);
   app.use('/api', auditRouter);
   app.use('/api', uploadRouter);
+  app.use('/api', usageRouter);
   app.use('/api', chatRouter);
 
   if (fs.existsSync(WEB_DIST)) {
