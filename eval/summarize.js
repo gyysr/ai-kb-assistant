@@ -1,3 +1,7 @@
+// ===== 评测报告生成器：把 results.json 变成给人看的 report.md =====
+// promptfoo 跑完把每道题的原始结果（回答原文、是否通过、延迟、token 数）
+// 写进 results.json；本脚本按四类题目聚合，算通过率/引用率/延迟/成本，
+// 挑出失败用例，渲染成 Markdown 报告。运行方式：node summarize.js
 // 汇总 promptfoo results.json → report.md
 const fs = require('fs');
 const path = require('path');
@@ -6,11 +10,15 @@ const path = require('path');
 const PRICE_IN = 0.0008;
 const PRICE_OUT = 0.002;
 
+// 输入输出都固定在 eval/ 目录：__dirname 是本文件所在目录
 const resultsPath = path.join(__dirname, 'results.json');
 const outPath = path.join(__dirname, 'report.md');
 
+// results.json 的外层格式随 promptfoo 版本变过：有时是数组、有时套在
+// results.results 里。这里把几种都兼容到，最终都拿到统一的题目结果数组
 const parsed = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
 let results;
+// stats 是整体统计（含判定模型的 token 消耗），能拿到就顺手留着
 let stats = null;
 if (Array.isArray(parsed)) {
   results = parsed;
@@ -23,6 +31,8 @@ if (Array.isArray(parsed)) {
   results = [];
 }
 
+// 给一条结果归到四类之一：优先读题目 metadata 里写的 category；
+// 老格式没写就从 description 前缀猜（"fact-01 每日餐杂补贴" → fact）
 function categoryOf(r) {
   const cat = r.testCase?.metadata?.category;
   if (cat) return cat;
@@ -31,7 +41,9 @@ function categoryOf(r) {
   return prefix || 'unknown';
 }
 
+// 匹配回答里的 [数字] 引用角标 —— 用它统计"引用率"（回答有没有标出处）
 const citationRe = /\[\d+\]/;
+// 四类题目的中文名；ORDER 是报告表格里的固定排序（未分类排最后）
 const CATEGORY_LABEL = {
   fact: '事实类',
   'out-of-scope': '超范围类',
@@ -41,6 +53,8 @@ const CATEGORY_LABEL = {
 };
 const ORDER = ['fact', 'out-of-scope', 'adversarial', 'ambiguous', 'unknown'];
 
+// 按类别聚合的主循环：每类攒一个计数器 —— 题数、通过数、带引用数、
+// 延迟列表、token 数、失败用例明细
 const byCategory = new Map();
 for (const r of results) {
   const cat = categoryOf(r);
@@ -49,9 +63,11 @@ for (const r of results) {
   }
   const agg = byCategory.get(cat);
   agg.total += 1;
+  // success 是 promptfoo 给的"本题是否通过（所有断言全过）"标记
   if (r.success) agg.pass += 1;
   const output = String(r.response?.output ?? '');
   if (citationRe.test(output)) agg.citations += 1;
+  // 延迟取自 provider 返回的 latencyMs（不同版本字段位置不同，都试试）
   const latency = r.response?.latencyMs ?? r.latencyMs ?? null;
   if (latency != null) agg.latencies.push(latency);
   const tu = r.response?.tokenUsage;
@@ -59,6 +75,8 @@ for (const r of results) {
     agg.tokens.prompt += tu.prompt || 0;
     agg.tokens.completion += tu.completion || 0;
   }
+  // 失败的题单独记一份明细：哪道题、问题是什么、败在哪条断言、回答摘录，
+  // 供报告末尾逐条列出
   if (!r.success) {
     const failedComponents = (r.gradingResult?.componentResults || [])
       .filter((c) => c.pass === false)
@@ -72,12 +90,15 @@ for (const r of results) {
   }
 }
 
+// 95 分位延迟：排序后取第 95% 位置的值。比平均值更能反映"最卡的那批
+// 请求"有多卡 —— 平均值会被大量快请求稀释
 function p95(arr) {
   if (arr.length === 0) return null;
   const sorted = [...arr].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
 }
 
+// 毫秒 → "x.x 秒"；没数据（v 为 null）显示 "-"
 function fmtMs(v) {
   return v == null ? '-' : `${(v / 1000).toFixed(1)}s`;
 }
@@ -88,6 +109,8 @@ let allLatencies = [];
 let totalTests = 0;
 let totalPass = 0;
 
+// 按固定顺序遍历各类，各生成一行 Markdown 表格（| a | b | c | 格式），
+// 同时顺手累计全局的 token、延迟、题数、通过数
 const rows = [];
 for (const cat of ORDER) {
   const agg = byCategory.get(cat);
@@ -104,6 +127,7 @@ for (const cat of ORDER) {
 }
 
 // 判定（llm-rubric）消耗的 token，与被测系统分开计费
+// 当裁判的也是 qwen-plus，同样要花钱 —— 所以总成本 = 被测系统 + 判定两部分
 const gradePrompt = stats?.tokenUsage?.assertions?.prompt ?? 0;
 const gradeCompletion = stats?.tokenUsage?.assertions?.completion ?? 0;
 const costYuan =
@@ -112,6 +136,8 @@ const costYuan =
   (gradePrompt / 1000) * PRICE_IN +
   (gradeCompletion / 1000) * PRICE_OUT;
 
+// 总体指标：通过率、引用率，以及"编造风险"代理指标 —— 对抗类和超范围类
+// 的失败总数。这两类题考的就是"不编造"，它们的失败数近似等于幻觉次数
 const overallAccuracy = totalTests ? ((totalPass / totalTests) * 100).toFixed(1) : '-';
 const overallCitations = [...byCategory.values()].reduce((a, b) => a + b.citations, 0);
 const riskCats = byCategory.get('adversarial');
@@ -119,6 +145,7 @@ const scopeCats = byCategory.get('out-of-scope');
 const hallucinationProxy =
   riskCats && scopeCats ? `${(riskCats.total - riskCats.pass) + (scopeCats.total - scopeCats.pass)}/${riskCats.total + scopeCats.total}` : '-';
 
+// 失败用例明细：按类别分小节，每条列出题目、败因断言和回答摘录（截断防超长）
 const failLines = [];
 for (const cat of ORDER) {
   const agg = byCategory.get(cat);
@@ -131,6 +158,7 @@ for (const cat of ORDER) {
   }
 }
 
+// 报告正文：一个 Markdown 模板字符串，${} 占位符填上面算好的各指标数字
 const report = `# AI 知识库问答助手 评测报告
 
 - 评测时间：${new Date().toISOString().slice(0, 19).replace('T', ' ')}
@@ -165,6 +193,7 @@ ${rows.join('\n')}
 ${failLines.length > 0 ? failLines.join('\n') : '（全部通过，无失败用例）'}
 `;
 
+// 写出 report.md，并在终端打一行摘要（跑完不用打开文件也能瞄一眼结果）
 fs.writeFileSync(outPath, report, 'utf8');
 console.log(`report written: ${outPath}`);
 console.log(

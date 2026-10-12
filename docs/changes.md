@@ -163,6 +163,22 @@
 
 **涉及文件**：`server/src/routes/usage.ts`（新增）、`server/src/services/webSearch.ts`、`web/src/App.tsx`、`web/src/api.ts`
 
+### 3.6 全量教学注释 + 各文件夹 README（2026-10-12，`3f0232a` + 本次）
+
+**做了什么**：把整个仓库变成"自带教材的项目"，分两轮：
+- **第一轮（`3f0232a`）**：建本变更日志（就是你正在读的这份）+ 给 10 个核心文件（api.ts、ChatPanel、ChatMessage、EChartBlock、App、agent、webSearch、usage 路由、Dockerfile、compose）补教学注释。
+- **第二轮（本次）**：注释铺满全仓库——server/ 剩余 29 个文件（routes/services/db/middlewares/utils）、web/ 剩余 7 个（main/auth/types/LoginView/DocPanel/AuditPanel 等）、eval/ 3 个（provider.js/summarize.js/题目配置），新增约 640 行注释。同时新增 4 份模块 README（server/、web/、eval/、docs/），根 README 的 API 表补全为 11 个接口并修正 upload 权限为 admin。
+
+**注释的风格约定**（想给别的项目写同样注释可以照抄这套）：
+1. 每个文件开头 2-4 行"文件头"：这个文件在项目里的角色、跟谁协作
+2. 关键逻辑前 1-3 行，讲**为什么**（"res.on('close') 而不是 req.on"，因为 Node 21 的坑），不只是做了什么
+3. 概念第一次出现就地科普（BFF/中间件/JWT/连接池/余弦相似度……）
+4. 项目踩过的坑写进注释（BIGSERIAL 返回字符串、pino-pretty 必须 dev 分支 require、LegendScrollComponent 要单独注册……）
+
+**怎么保证"只加注释没改坏代码"**：三个并行子代理分包处理，每个代理交差时自查 `tsc --noEmit`；最后主线程再统一跑一遍——web tsc + build、server tsc 全绿，且构建产物与前一个 commit **逐字节一致**（161.52KB 主包 + 560.93KB 图表分包），注释零影响得到实证。
+
+**涉及文件**：全部 42 个源码文件 + 5 份 README（根/server/web/eval/docs）
+
 ---
 
 ## 附：踩坑速查表（按主题）

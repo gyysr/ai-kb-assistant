@@ -2,8 +2,16 @@
 
 基于 **Node.js BFF + React + PostgreSQL/pgvector + 通义千问（Qwen）** 的企业知识库问答系统，覆盖 RAG 全链路：文档解析入库 → 向量检索 → Agent 工具调用 → SSE 流式回答（带引用标注）→ 权限审计 → 监控降级 → promptfoo 自动化评测。
 
-配套技术文章：[《用 Node.js BFF 搭建 RAG 知识库系统》](docs/article.md)
-逐次变更详解（面向零基础读者）：[docs/changes.md](docs/changes.md)
+配套文档：
+- 技术文章：[《用 Node.js BFF 搭建 RAG 知识库系统》](docs/article.md)
+- 逐次变更详解（面向零基础读者）：[docs/changes.md](docs/changes.md)
+- 部署运维手册：[docs/deployment.md](docs/deployment.md)
+- 文档索引：[docs/README.md](docs/README.md)
+
+各模块详细说明（目录结构、API、协议、命令）：
+- 后端 BFF：[server/README.md](server/README.md)
+- 前端：[web/README.md](web/README.md)
+- 评测：[eval/README.md](eval/README.md)
 
 ## 功能特性
 
@@ -29,17 +37,19 @@
 ## 目录结构
 
 ```
-├── server/                 # Express BFF（端口 3001）
+├── server/                 # Express BFF（端口 3001）→ 详见 server/README.md
 │   ├── src/
-│   │   ├── routes/         # health / auth / chat / upload / documents / audit
+│   │   ├── routes/         # health / auth / chat / upload / documents / audit / usage
 │   │   ├── services/       # agent 循环、工具、检索、嵌入、分块、SSE 流式
 │   │   ├── middlewares/    # JWT 鉴权、RBAC、请求日志、错误处理
 │   │   └── db/             # pg 连接、schema、向量检索 SQL
 │   └── scripts/            # 生成测试用 PDF 脚本
-├── web/                    # React 前端（端口 5173，/api 代理到 3001）
-│   └── src/components/     # 对话 / 文档管理 / 审计日志三面板 + 登录页
-├── eval/                   # promptfoo 评测：题目集、SSE provider、报告
-└── docs/article.md         # 技术文章
+├── web/                    # React 前端（端口 5173，/api 代理到 3001）→ 详见 web/README.md
+│   └── src/components/     # 对话 / 文档管理 / 审计日志三面板 + 登录页 + 图表块
+├── eval/                   # promptfoo 评测 → 详见 eval/README.md
+├── docs/                   # 文档中心（变更日志 / 技术文章 / 部署手册）→ 详见 docs/README.md
+├── Dockerfile              # 多阶段构建（前端 + 后端 + 运行时），含教学注释
+└── docker-compose.yml      # app + pg 两个容器编排，含教学注释
 ```
 
 ## 快速开始
@@ -82,16 +92,21 @@ node summarize.js            # 汇总指标，重写 report.md
 
 ## API 概览
 
+完整协议（含 SSE 帧格式、环境变量）见 [server/README.md](server/README.md)。
+
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/api/health` | 健康检查 | 公开 |
+| POST | `/api/auth/register` | 注册，返回 JWT | 公开 |
 | POST | `/api/auth/login` | 登录，返回 JWT | 公开 |
 | GET | `/api/auth/me` | 当前用户信息 | 登录 |
+| POST | `/api/auth/logout` | 登出（落审计日志） | 登录 |
 | POST | `/api/chat` | SSE 流式问答（delta / tool / sources / done / error） | 登录 |
-| POST | `/api/upload` | 上传 PDF / Markdown 并入库 | 登录 |
+| POST | `/api/upload` | 上传 PDF / Markdown 并入库 | admin |
 | GET | `/api/documents` | 文档列表 | 登录 |
 | DELETE | `/api/documents/:id` | 删除文档 | admin |
 | GET | `/api/audit` | 审计日志 | admin |
+| GET | `/api/usage` | 联网搜索剩余额度（前端徽标） | 登录 |
 
 ## 环境变量
 

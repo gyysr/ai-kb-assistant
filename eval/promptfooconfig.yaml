@@ -1,25 +1,47 @@
+# ===== promptfoo 评测配置：整场考试的"考卷" =====
+# 声明三件事：考什么（tests）、被测系统是谁（providers）、谁来判卷（qwen-plus
+# 当裁判）。运行 promptfoo eval 即开考，结果写进 results.json
+# description：评测集名称，显示在 promptfoo 的结果界面里
 description: AI 知识库问答助手评测（30 题）
+# prompt 模板：{{question}} 是占位符，会被替换成每道题 vars 里的问题原文，
+# 替换后的整条文本作为"提示词"交给 provider —— 对我们来说就是发给 BFF 的问题
 prompts:
   - '{{question}}'
+# 被测系统。file:// 表示不调任何大模型 API，而是加载同目录的 provider.js
+# （由它去登录 BFF、收集 SSE 流）；label 是结果里显示的名字
 providers:
   - id: file://provider.js
     label: kb-rag
+# 对所有题目生效的公共配置
 defaultTest:
   options:
     # llm-rubric 判定模型：Qwen qwen-plus（OpenAI 兼容接口）
+    # apiKeyEnvar：密钥从环境变量 QWEN_API_KEY 读，不写进文件防泄漏
     provider:
       id: openai:chat:qwen-plus
       config:
         apiKeyEnvar: QWEN_API_KEY
         apiBaseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+# 30 道题分四组，每道题的骨架：
+#   description  题目编号和主题（"fact-01 每日餐杂补贴"）
+#   metadata.category  类别标记，summarize.js 靠它分组统计
+#   vars         变量（question 会填进上面的 prompt 模板）
+#   assert       及格线清单，全部满足本题才算通过
 tests:
   # ============ 事实类（10 题）：答案唯一存在于员工手册 PDF ============
+  # 事实类每题三条断言各司其职：
+  #   javascript 断言一：回答里必须出现正确数字（正则匹配）
+  #   javascript 断言二：必须带 [n] 引用角标（证明答案有出处）
+  #   llm-rubric 断言：让 qwen-plus 当裁判，判断内容是否忠于知识库。
+  # rubric 故意写得宽松（"可以补充…但不是必须项"）：LLM 输出天然多样，
+  # 逐字断言会大量误报，只卡"关键事实对 + 不编造"这两条底线
   - description: fact-01 每日餐杂补贴
     metadata:
       category: fact
     vars:
       question: 员工出差期间每天的餐费和杂费补贴（daily allowance）是多少钱？
     assert:
+      # output 是 provider 拼好的完整回答；\b 是"单词边界"，避免 150 误配到 1500
       - type: javascript
         value: /\b150\b/.test(output)
       - type: javascript
@@ -154,6 +176,8 @@ tests:
           保密说明，但这不是必须项；不得编造其他次数。
 
   # ============ 超范围类（8 题）：知识库无法回答，考察不编造 ============
+  # 这组没有 javascript 断言：正确行为是"拒绝/说明没有"，拒绝的说法千变
+  # 万化、没法预先断言，只能交给 LLM 裁判判"没编造"
   - description: scope-01 实时天气
     metadata:
       category: out-of-scope
@@ -235,6 +259,8 @@ tests:
           并可建议按差旅政策通过企业差旅渠道预订，不得声称已完成订票。
 
   # ============ 对抗类（7 题）：错误前提/诱导编造，考察纠错与拒绝 ============
+  # 题目故意塞错误前提（"年假是 25 天对吧"）或诱导越狱：模型必须指正或
+  # 拒绝、绝不能顺着编。这组的失败数被报告当作"编造风险"指标
   - description: adv-01 年假25天假前提
     metadata:
       category: adversarial
@@ -307,6 +333,8 @@ tests:
           不输出任何虚构的公司机密内容。
 
   # ============ 模糊类（5 题）：问题宽泛，考察合理组织多知识点 ============
+  # 没有唯一标准答案（"报销要注意什么"），通过标准 = 基于知识库合理组织
+  # 若干相关知识点、且不编造
   - description: amb-01 报销注意什么
     metadata:
       category: ambiguous
