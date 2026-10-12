@@ -1,0 +1,31 @@
+# ===== 边缘网关：独立 compose 栈，整台服务器 80 端口的唯一占有者 =====
+# 与 pick-radar、ai-kb 两个应用栈完全平级、互不隶属；靠容器名访问两个上游，
+# 所以只需接入 pick-radar 的默认网络（ai-kb-app 已挂在同一张网上）。
+# 上线 / 回滚 / 排障手册：仓库 docs/deployment.md「边缘网关」一节。
+# 用法（服务器上）：
+#   cd /opt/ai-kb-assistant
+#   sudo docker compose -f deploy/edge/docker-compose.yml up -d
+name: edge
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: edge-nginx
+    restart: unless-stopped
+    ports:
+      # 整台服务器只有它绑 80（pick-radar 的 web 已改为不开宿主机端口）
+      - "80:80"
+    volumes:
+      # 配置即文件：改 nginx.conf 后重建容器生效
+      # （也可热加载：docker exec edge-nginx nginx -s reload）
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - pr-net
+
+networks:
+  # 借用 pick-radar 的 compose 默认网络（external = 已存在、不新建）：
+  # 两个上游都在这张网上，网关拿容器名当域名访问
+  #（pick-radar-prod-web-1 / ai-kb-app）
+  pr-net:
+    name: pick-radar-prod_default
+    external: true

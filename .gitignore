@@ -15,6 +15,9 @@ server/uploads/*
 # 评测原始结果（体积大，保留报告即可）
 eval/results.json
 
+# 服务器运维备份（如 pick-radar 切换边缘网关前的旧配置，见 docs/deployment.md）
+backups/
+
 # 系统与编辑器
 .DS_Store
 *.log
